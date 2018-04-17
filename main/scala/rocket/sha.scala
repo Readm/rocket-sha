@@ -35,26 +35,22 @@ class ShaIO(dataBits: Int) extends Bundle {
   val resp = Decoupled(new ShaResp(dataBits))
 }
 
-class Outter(implicit p: Parameters) extends CoreModule()(p) {
+class Sha(implicit p: Parameters) extends CoreModule()(p) {
   val io = new ShaIO(64)
-  /*val io  = new Bundle {
-    val in0 = UInt(INPUT, 64)
-    val in1 = UInt(INPUT, width = 64)
-    val ready = Bool(INPUT)
-    val kill  = Bool(INPUT)
 
-    val out = UInt(width = 64)
-    val valid = Bool(OUTPUT)
-    val busy  = Bool(OUTPUT)
-  }*/
+  val dpath = Module(new DpathModule(64, 1))
+  dpath.io.begin := false.B
+  dpath.io.end   := false.B
+  dpath.io.stage := 0.U
 
-  val sha3_init = Reg(init=Bool(false))
-  val aindex = Reg(init = UInt(0,5))
-  val sum = Reg(UInt()) // temp out = in0 + in1
+  val round = Reg(init = UInt(0,5))
+
   val cr = Reg(Bool())
   val old_hash = Reg(UInt())
 
   val s_idle:: s_absorb :: s_squeeze :: Nil = Enum(UInt(), 3)
+  // absorb is absorb(1 cycle) and work
+  // s_squeeze is suqeeze and wait to output
   val state = Reg(init=s_idle)
 
   state := state
@@ -63,25 +59,34 @@ class Outter(implicit p: Parameters) extends CoreModule()(p) {
     is(s_idle) {
       when(io.req.fire()) {
         state := s_absorb
-        sum := io.req.bits.in1 ^ io.req.bits.in2
+        round := 1.U
+
+        dpath.io.in1 := io.req.bits.in1
+        dpath.io.in2 := io.req.bits.in2
+        dpath.io.begin := true.B
+        dpath.io.round := 0.U
+
         cr := io.req.bits.cr
         old_hash := io.req.bits.old_hash
         // input here
       }
     }
     is(s_absorb) {
-      when(aindex < UInt(24)) {
-        aindex := aindex + UInt(1)
+      when(round < UInt(24)) {
+        round := round + UInt(1)
+
+        dpath.io.round := round
+
       }.otherwise {
-        aindex := UInt(0)
-        sha3_init := true
+        round := UInt(0)
         state := s_squeeze
+        dpath.io.end := false.B
       }
     }
     is(s_squeeze) {
+      dpath.io.end := false.B  //hold the value
       when(io.resp.fire()) {
         state := s_idle
-        sha3_init:= false
       }
     }
   }
@@ -91,7 +96,7 @@ class Outter(implicit p: Parameters) extends CoreModule()(p) {
 
   io.req.ready := state===s_idle
   io.resp.valid := state===s_squeeze
-  io.resp.bits.data := sum
+  io.resp.bits.data := dpath.io.out
   io.resp.bits.cr := cr
   io.resp.bits.old_hash := old_hash
 

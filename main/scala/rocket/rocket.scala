@@ -324,7 +324,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   alu.io.in1 := ex_op1.asUInt
 
   // sha3
-  val sha = Module(new Outter)
+  val sha = Module(new Sha)
   sha.io.req.bits.in1 := salt_reg
   sha.io.req.bits.in2 := Mux(ex_ctrl.prwcr,
     compressHashAddress(Mux(sha.io.resp.fire(), cutHashedHash(Mux(sha.io.resp.bits.cr, sha.io.resp.bits.data, sha.io.resp.bits.old_hash)), top_reg),ex_rs(0)),
