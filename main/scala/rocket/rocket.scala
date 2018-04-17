@@ -168,6 +168,11 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   val mem_ctrl = Reg(new IntCtrlSigs)
   val wb_ctrl = Reg(new IntCtrlSigs)
 
+  val salt_reg = Reg(init = "hABCDABCDABCDABCD".U)
+  val top_reg  = Reg(init = "hADD0AD".U)
+  val pbr_mis   = Wire(init = Bool(false))
+
+
   val ex_reg_xcpt_interrupt  = Reg(Bool())
   val ex_reg_valid           = Reg(Bool())
   val ex_reg_rvc             = Reg(Bool())
@@ -317,7 +322,17 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   alu.io.fn := ex_ctrl.alu_fn
   alu.io.in2 := ex_op2.asUInt
   alu.io.in1 := ex_op1.asUInt
-  
+
+  // sha3
+  val sha = Module(new Outter)
+  sha.io.req.bits.in1 := salt_reg
+  sha.io.req.bits.in2 := Mux(ex_ctrl.prwcr,
+    compressHashAddress(Mux(sha.io.resp.fire(), cutHashedHash(Mux(sha.io.resp.bits.cr, sha.io.resp.bits.data, sha.io.resp.bits.old_hash)), top_reg),ex_rs(0)),
+    ex_rs(0))
+  sha.io.req.bits.cr := ex_ctrl.prwcr
+  sha.io.req.bits.old_hash := cutHashedHash(ex_rs(0))
+  sha.io.req.valid := ex_reg_valid && ex_ctrl.phash
+
   // multiplier and divider
   val div = Module(new MulDiv(p(MulDivKey).getOrElse(MulDivConfig()), width = xLen))
   div.io.req.valid := ex_reg_valid && ex_ctrl.div
@@ -377,7 +392,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   val ex_pc_valid = ex_reg_valid || ex_reg_replay || ex_reg_xcpt_interrupt
   val wb_dcache_miss = wb_ctrl.mem && !io.dmem.resp.valid
   val replay_ex_structural = ex_ctrl.mem && !io.dmem.req.ready ||
-                             ex_ctrl.div && !div.io.req.ready
+                             ex_ctrl.div && !div.io.req.ready ||
+                             ex_ctrl.phash && !sha.io.req.ready
   val replay_ex_load_use = wb_dcache_miss && ex_reg_load_use
   val replay_ex = ex_reg_replay || (ex_reg_valid && (replay_ex_structural || replay_ex_load_use))
   val ctrl_killx = take_pc_mem_wb || replay_ex || !ex_reg_valid
@@ -397,6 +413,10 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   val mem_npc = (Mux(mem_ctrl.jalr, encodeVirtualAddress(mem_reg_wdata, mem_reg_wdata).asSInt, mem_br_target) & SInt(-2)).asUInt
   val mem_wrong_npc = Mux(ex_pc_valid, mem_npc =/= ex_reg_pc, Mux(ibuf.io.inst(0).valid, mem_npc =/= ibuf.io.pc, Bool(true)))
   val mem_npc_misaligned = !csr.io.status.isa('c'-'a') && mem_npc(1)
+  when(mem_ctrl.phash){
+    printf("mem_reg: %x\n", mem_reg_wdata)
+    //printf("mem_reg/int/br: %x\n",mem_int_wdata.asUInt())
+  }
   val mem_int_wdata = Mux(!mem_reg_xcpt && (mem_ctrl.jalr ^ mem_npc_misaligned), mem_br_target, mem_reg_wdata.asSInt).asUInt
   val mem_cfi = mem_ctrl.branch || mem_ctrl.jalr || mem_ctrl.jal
   val mem_cfi_taken = (mem_ctrl.branch && mem_br_taken) || mem_ctrl.jalr || (Bool(!fastJAL) && mem_ctrl.jal)
@@ -424,6 +444,15 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
     mem_reg_inst := ex_reg_inst
     mem_reg_pc := ex_reg_pc
     mem_reg_wdata := alu.io.out
+    when(ex_ctrl.phash){
+      when(ex_ctrl.prwcr){
+        printf("call:mem_reg_wdata->%x\n", compressHashAddress(top_reg,ex_rs(0)))
+        mem_reg_wdata := compressHashAddress(top_reg, ex_rs(0))
+      }.otherwise{
+        printf("ret:mem_reg_wdata->%x %x\n", restoreHashedAddress(ex_rs(0)), ex_rs(0))
+        mem_reg_wdata := restoreHashedAddress(ex_rs(0))
+      }
+    }
     when (ex_ctrl.rxs2 && (ex_ctrl.mem || ex_ctrl.rocc)) {
       mem_reg_rs2 := ex_rs(1)
     }
@@ -442,6 +471,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
 
   val (mem_xcpt, mem_cause) = checkExceptions(List(
     (mem_reg_xcpt_interrupt || mem_reg_xcpt, mem_reg_cause),
+    (pbr_mis,                                UInt(Causes.illegal_instruction)),
     (mem_reg_valid && mem_new_xcpt,          mem_new_cause)))
 
   val dcache_kill_mem = mem_reg_valid && mem_ctrl.wxd && io.dmem.replay_next // structural hazard on writeback port
@@ -449,6 +479,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   val replay_mem  = dcache_kill_mem || mem_reg_replay || fpu_kill_mem
   val killm_common = dcache_kill_mem || take_pc_wb || mem_reg_xcpt || !mem_reg_valid
   div.io.kill := killm_common && Reg(next = div.io.req.fire())
+  sha.io.kill := killm_common && Reg(next = sha.io.req.fire())
   val ctrl_killm = killm_common || mem_xcpt || fpu_kill_mem
 
   // writeback stage
@@ -506,11 +537,28 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   val wb_wen = wb_valid && wb_ctrl.wxd
   val rf_wen = wb_wen || ll_wen 
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
+
+  when(wb_ctrl.phash){printf("wb_reg_wdata: %x\n", wb_reg_wdata)}
   val rf_wdata = Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data,
                  Mux(ll_wen, ll_wdata,
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,
                  wb_reg_wdata)))
   when (rf_wen) { rf.write(rf_waddr, rf_wdata) }
+
+  sha.io.resp.ready := true
+  when (sha.io.resp.fire()) {
+    when (sha.io.resp.bits.cr){
+      printf("call update : %x->%x\n", top_reg, sha.io.resp.bits.data)
+      top_reg := cutHashedHash(sha.io.resp.bits.data)
+    }.otherwise{
+      when (top_reg =/= cutHashedHash(sha.io.resp.bits.data)){
+        pbr_mis := Bool(true)
+        printf("mismatch :%x, %x\n" , top_reg, sha.io.resp.bits.data)
+      }
+      printf("ret update : %x->%x\n", top_reg, sha.io.resp.bits.old_hash)
+      top_reg := sha.io.resp.bits.old_hash
+    }
+  }
 
   // hook up control/status regfile
   csr.io.exception := wb_reg_xcpt
@@ -584,6 +632,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
     id_ctrl.mem && dcache_blocked || // reduce activity during D$ misses
     id_ctrl.rocc && rocc_blocked || // reduce activity while RoCC is busy
     id_ctrl.div && (!(div.io.req.ready || (div.io.resp.valid && !wb_wxd)) || div.io.req.valid) || // reduce odds of replay
+    id_ctrl.phash && (!(sha.io.req.ready || (sha.io.resp.valid)) || sha.io.req.valid) ||
     id_do_fence ||
     csr.io.csr_stall
   ctrl_killd := !ibuf.io.inst(0).valid || ibuf.io.inst(0).bits.replay || take_pc_mem_wb || ctrl_stalld || csr.io.interrupt
@@ -691,6 +740,12 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
          wb_reg_inst(24,20), Reg(next=Reg(next=ex_rs(1))),
          wb_reg_inst, wb_reg_inst)
   }
+
+  def HASHSIZE=24 // not used
+  def compressHashAddress(hash: UInt, add: UInt) = Cat(hash,add(39,0))
+  def restoreHashedAddress(hashed: UInt) = Cat("h000000".U, hashed(39,0))  //"h000000ffffffffff".U(64)  & hashed
+  def cutHashedHash(hashed: UInt) = hashed(63,40)
+
 
   def checkExceptions(x: Seq[(Bool, UInt)]) =
     (x.map(_._1).reduce(_||_), PriorityMux(x))
