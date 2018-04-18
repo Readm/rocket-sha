@@ -73,7 +73,7 @@ class Sha(implicit p: Parameters) extends CoreModule()(p) {
     }
     is(s_absorb) {
       round := round + UInt(1)
-      when(round < UInt(24)) {
+      when(round < UInt(20)) {
         dpath.io.round := round
 
       }.otherwise {
@@ -84,7 +84,7 @@ class Sha(implicit p: Parameters) extends CoreModule()(p) {
       round := 0.U
       dpath.io.end := true.B  //hold the value
       when(io.resp.fire()) {
-        printf("sha.resp: %x", dpath.io.out)
+        //printf("sha.resp: %x", dpath.io.out)
         state := s_idle
       }
     }

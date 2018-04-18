@@ -548,14 +548,14 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   sha.io.resp.ready := true
   when (sha.io.resp.fire()) {
     when (sha.io.resp.bits.cr){
-      printf("call update : %x->%x\n", top_reg, sha.io.resp.bits.data)
+      //printf("call update : %x->%x\n", top_reg, sha.io.resp.bits.data)
       top_reg := cutHashedHash(sha.io.resp.bits.data)
     }.otherwise{
       when (top_reg =/= cutHashedHash(sha.io.resp.bits.data)){
         pbr_mis := Bool(true)
-        printf("mismatch :%x, %x\n" , top_reg, sha.io.resp.bits.data)
+        //printf("mismatch :%x, %x\n" , top_reg, sha.io.resp.bits.data)
       }
-      printf("ret update : %x->%x\n", top_reg, sha.io.resp.bits.old_hash)
+      //printf("ret update : %x->%x\n", top_reg, sha.io.resp.bits.old_hash)
       top_reg := sha.io.resp.bits.old_hash
     }
   }
