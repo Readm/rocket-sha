@@ -110,6 +110,7 @@ class DpathModule(val W: Int, val S: Int) extends Module {
   }
 
   when(io.begin){
+    printf("begin with: %x, %x", io.in1, io.in2)
     state := state // when not begin or end, the state is always changing
     for (i <- 0 until 4) {
       state(i) := io.in1(16 * i + 15, 16 * i)
@@ -126,5 +127,8 @@ class DpathModule(val W: Int, val S: Int) extends Module {
 
   io.out := Cat(state(0), state(2), state(4), state(6))
 
+  when (io.round =/= 0.U){
+    printf("dpath.round: %d->%x\n", io.round, io.out)
+  }
 
 }

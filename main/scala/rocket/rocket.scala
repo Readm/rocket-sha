@@ -413,10 +413,6 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   val mem_npc = (Mux(mem_ctrl.jalr, encodeVirtualAddress(mem_reg_wdata, mem_reg_wdata).asSInt, mem_br_target) & SInt(-2)).asUInt
   val mem_wrong_npc = Mux(ex_pc_valid, mem_npc =/= ex_reg_pc, Mux(ibuf.io.inst(0).valid, mem_npc =/= ibuf.io.pc, Bool(true)))
   val mem_npc_misaligned = !csr.io.status.isa('c'-'a') && mem_npc(1)
-  when(mem_ctrl.phash){
-    //printf("mem_reg: %x\n", mem_reg_wdata)
-    //printf("mem_reg/int/br: %x\n",mem_int_wdata.asUInt())
-  }
   val mem_int_wdata = Mux(!mem_reg_xcpt && (mem_ctrl.jalr ^ mem_npc_misaligned), mem_br_target, mem_reg_wdata.asSInt).asUInt
   val mem_cfi = mem_ctrl.branch || mem_ctrl.jalr || mem_ctrl.jal
   val mem_cfi_taken = (mem_ctrl.branch && mem_br_taken) || mem_ctrl.jalr || (Bool(!fastJAL) && mem_ctrl.jal)
@@ -446,10 +442,8 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
     mem_reg_wdata := alu.io.out
     when(ex_ctrl.phash){
       when(ex_ctrl.prwcr){
-        //printf("call:mem_reg_wdata->%x\n", compressHashAddress(top_reg,ex_rs(0)))
         mem_reg_wdata := compressHashAddress(top_reg, ex_rs(0))
       }.otherwise{
-        //printf("ret:mem_reg_wdata->%x %x\n", restoreHashedAddress(ex_rs(0)), ex_rs(0))
         mem_reg_wdata := restoreHashedAddress(ex_rs(0))
       }
     }
@@ -538,7 +532,6 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   val rf_wen = wb_wen || ll_wen 
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
 
-  //when(wb_ctrl.phash){printf("wb_reg_wdata: %x\n", wb_reg_wdata)}
   val rf_wdata = Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data,
                  Mux(ll_wen, ll_wdata,
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,
@@ -548,14 +541,14 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   sha.io.resp.ready := true
   when (sha.io.resp.fire()) {
     when (sha.io.resp.bits.cr){
-      //printf("call update : %x->%x\n", top_reg, sha.io.resp.bits.data)
+      printf("call update : %x->%x\n", top_reg, sha.io.resp.bits.data)
       top_reg := cutHashedHash(sha.io.resp.bits.data)
     }.otherwise{
       when (top_reg =/= cutHashedHash(sha.io.resp.bits.data)){
         pbr_mis := Bool(true)
         //printf("mismatch :%x, %x\n" , top_reg, sha.io.resp.bits.data)
       }
-      //printf("ret update : %x->%x\n", top_reg, sha.io.resp.bits.old_hash)
+      printf("ret update : %x->%x\n", top_reg, sha.io.resp.bits.old_hash)
       top_reg := sha.io.resp.bits.old_hash
     }
   }

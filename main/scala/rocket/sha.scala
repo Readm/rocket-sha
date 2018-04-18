@@ -37,13 +37,15 @@ class ShaIO(dataBits: Int) extends Bundle {
 
 class Sha(implicit p: Parameters) extends CoreModule()(p) {
   val io = new ShaIO(64)
+  val stage_num = 1
+  val round_num = 20 //2*4+12
 
   val dpath = Module(new DpathModule(64, 1))
   dpath.io.begin := false.B
   dpath.io.end   := false.B
   dpath.io.stage := 0.U
 
-  val round = Reg(init = UInt(0,5))
+  val cycle_n = Reg(init = UInt(0,log2Ceil(stage_num*round_num)))
 
   val cr = Reg(Bool())
   val old_hash = Reg(UInt())
@@ -54,37 +56,26 @@ class Sha(implicit p: Parameters) extends CoreModule()(p) {
   val state = Reg(init=s_idle)
 
   state := state
+  cycle_n := cycle_n + UInt(1)
 
   switch(state) {
     is(s_idle) {
+      cycle_n := 0.U
       when(io.req.fire()) {
         state := s_absorb
-        round := 1.U
-
-        dpath.io.in1 := io.req.bits.in1
-        dpath.io.in2 := io.req.bits.in2
         dpath.io.begin := true.B
-        dpath.io.round := 0.U
-
         cr := io.req.bits.cr
         old_hash := io.req.bits.old_hash
-        // input here
       }
     }
     is(s_absorb) {
-      round := round + UInt(1)
-      when(round < UInt(20)) {
-        dpath.io.round := round
-
-      }.otherwise {
+      when(cycle_n >= UInt(round_num*stage_num)-1.U) {
         state := s_squeeze
       }
     }
     is(s_squeeze) {
-      round := 0.U
       dpath.io.end := true.B  //hold the value
       when(io.resp.fire()) {
-        //printf("sha.resp: %x", dpath.io.out)
         state := s_idle
       }
     }
@@ -93,8 +84,12 @@ class Sha(implicit p: Parameters) extends CoreModule()(p) {
 
   when(io.kill){
     state:=s_idle
-    round := 0.U
+    cycle_n := 0.U
   }
+
+  dpath.io.in1 := io.req.bits.in1
+  dpath.io.in2 := io.req.bits.in2
+  dpath.io.round := cycle_n >> log2Ceil(stage_num)
 
   io.req.ready := state===s_idle
   io.resp.valid := state===s_squeeze
