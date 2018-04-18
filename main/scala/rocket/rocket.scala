@@ -414,7 +414,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   val mem_wrong_npc = Mux(ex_pc_valid, mem_npc =/= ex_reg_pc, Mux(ibuf.io.inst(0).valid, mem_npc =/= ibuf.io.pc, Bool(true)))
   val mem_npc_misaligned = !csr.io.status.isa('c'-'a') && mem_npc(1)
   when(mem_ctrl.phash){
-    printf("mem_reg: %x\n", mem_reg_wdata)
+    //printf("mem_reg: %x\n", mem_reg_wdata)
     //printf("mem_reg/int/br: %x\n",mem_int_wdata.asUInt())
   }
   val mem_int_wdata = Mux(!mem_reg_xcpt && (mem_ctrl.jalr ^ mem_npc_misaligned), mem_br_target, mem_reg_wdata.asSInt).asUInt
@@ -446,10 +446,10 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
     mem_reg_wdata := alu.io.out
     when(ex_ctrl.phash){
       when(ex_ctrl.prwcr){
-        printf("call:mem_reg_wdata->%x\n", compressHashAddress(top_reg,ex_rs(0)))
+        //printf("call:mem_reg_wdata->%x\n", compressHashAddress(top_reg,ex_rs(0)))
         mem_reg_wdata := compressHashAddress(top_reg, ex_rs(0))
       }.otherwise{
-        printf("ret:mem_reg_wdata->%x %x\n", restoreHashedAddress(ex_rs(0)), ex_rs(0))
+        //printf("ret:mem_reg_wdata->%x %x\n", restoreHashedAddress(ex_rs(0)), ex_rs(0))
         mem_reg_wdata := restoreHashedAddress(ex_rs(0))
       }
     }
@@ -538,7 +538,7 @@ class Rocket(implicit p: Parameters) extends CoreModule()(p) {
   val rf_wen = wb_wen || ll_wen 
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
 
-  when(wb_ctrl.phash){printf("wb_reg_wdata: %x\n", wb_reg_wdata)}
+  //when(wb_ctrl.phash){printf("wb_reg_wdata: %x\n", wb_reg_wdata)}
   val rf_wdata = Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data,
                  Mux(ll_wen, ll_wdata,
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,

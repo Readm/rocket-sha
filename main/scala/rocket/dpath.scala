@@ -14,7 +14,7 @@ class DpathModule(val W: Int, val S: Int) extends Module {
   val c = 144
   //val round_size_words = c/W
   val rounds = 24 //12 + 2l
-  val state_W = 4
+  val state_W = 16
   //val hash_size_words = 256/W
   //val bytes_per_word = W/8
 
@@ -36,7 +36,7 @@ class DpathModule(val W: Int, val S: Int) extends Module {
     val out = UInt(OUTPUT, width=W)
   }
 
-  val state = Reg(Vec(5*5, Bits(0, width = 4)))
+  val state = Reg(Vec(5*5, Bits(0, width = 16)))
 
   //submodules
   val theta = Module(new ThetaModule(state_W)).io
@@ -111,21 +111,20 @@ class DpathModule(val W: Int, val S: Int) extends Module {
 
   when(io.begin){
     state := state // when not begin or end, the state is always changing
-    state(0) := io.in1(15,0)
-    state(1) := io.in1(31,16)
-    state(2) := io.in1(47,32)
-    state(3) := io.in1(63,48)
-    state(4) := io.in2(15,0)
-    state(5) := io.in2(31,16)
-    state(6) := io.in2(47,32)
-    state(7) := io.in2(63,48)
+    for (i <- 0 until 4) {
+      state(i) := io.in1(16 * i + 15, 16 * i)
+      state(i + 4) := io.in2(16 * i + 15, 16 * i)
+    }
     for (i <- 8 until 25)
       state(i) := 0.U
   }
 
   when(io.end){
     state := state
-    io.out := Cat(state(0), state(2), state(4), state(6))
   }
+
+
+  io.out := Cat(state(0), state(2), state(4), state(6))
+
 
 }

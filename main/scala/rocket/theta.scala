@@ -26,7 +26,7 @@ class ThetaModule(val W: Int = 64) extends Module {
     val t = Wire(Bits(width = W))
     t := bc((i+4)%5) ^ common.ROTL(bc((i+1)%5), UInt(1), UInt(W))
     for(j <- 0 until 5) {
-      //io.state_o(i*5+j) := io.state_i(i*5+j) ^ t
+      io.state_o(i*5+j) := io.state_i(i*5+j) ^ t
     }
   }
 }
